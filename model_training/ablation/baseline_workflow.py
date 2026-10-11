@@ -154,7 +154,11 @@ def run_stage(record, name, command, cwd):
     print(f"START {name}", flush=True)
     log = Path(record["output"]) / f"{name}.log"
     with log.open("w", encoding="utf-8") as stream:
-        child = subprocess.Popen(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT)
+        environment = dict(os.environ)
+        if "-deterministic" in command:
+            environment["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        entry["verification_environment"] = {"CUBLAS_WORKSPACE_CONFIG": environment.get("CUBLAS_WORKSPACE_CONFIG")}
+        child = subprocess.Popen(command, cwd=cwd, env=environment, stdout=stream, stderr=subprocess.STDOUT)
         entry["pid"] = child.pid
         save_manifest(Path(record["output"]) / "workflow.json", record)
         code = child.wait()
@@ -179,6 +183,8 @@ def train(record, model, *, smoke=False, dual=True, label=None):
         "-simu_folder", str(ROOT / f"simulation/fsaverage/constrained/standard_1020/fsav_994/simu/{name}")]
     if dual:
         command += ["-checkpoint_monitor", "validation_loss", "-save_comparison_checkpoint"]
+    if smoke:
+        command += ["-deterministic"]
     # Legacy invocation deliberately omits both new checkpoint-selection flags.
     run_stage(record, label or f"train_{model}", command, MT)
     paths = list(output.rglob("run_manifest.json"))
@@ -247,13 +253,12 @@ def verify_smoke(record):
     right = torch.load(dual["checkpoints"]["train_loss"]["weights"], weights_only=True)
     if left.keys() != right.keys():
         raise RuntimeError("Legacy/dual smoke weight keys differ")
-    # An unchanged legacy repeat differed by 4.285e-7 on this CUDA stack,
-    # with exactly identical logged losses. Do not change training kernels;
-    # use a recorded absolute tolerance only for this cross-process check.
+    # Verification alone requests deterministic CUDA operations. Full scientific
+    # runs retain their inherited runtime settings and record that distinction.
     maximum = max(float((left[k] - right[k]).abs().max()) for k in left)
-    record["smoke_weight_comparison"] = {"max_abs_difference": maximum, "atol": 1e-6, "rtol": 0}
-    if not all(torch.isfinite(right[k]).all() and torch.allclose(left[k], right[k], atol=1e-6, rtol=0) for k in left):
-        raise RuntimeError(f"Legacy/dual smoke weights differ beyond 1e-6: {maximum}")
+    record["smoke_weight_comparison"] = {"max_abs_difference": maximum, "atol": 0, "rtol": 0}
+    if not all(torch.equal(left[k], right[k]) for k in left):
+        raise RuntimeError(f"Deterministic legacy/dual smoke weights differ: {maximum}")
     for monitor, item in dual["checkpoints"].items():
         saved = torch.load(item["checkpoint"], map_location="cpu", weights_only=False)["state_dict"]
         exported = torch.load(item["weights"], weights_only=True)

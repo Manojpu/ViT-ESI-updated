@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -44,6 +45,9 @@ def make_manifest(args, repo_root, simu_path, train_ds, val_ds, model, lr, devic
             "requirements_lock_sha256": sha256(repo_root / "model_training/ablation/requirements-lock.txt"),
             "matmul_precision": torch.get_float32_matmul_precision(),
             "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+            "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
+            "cudnn_deterministic": torch.backends.cudnn.deterministic,
+            "cudnn_benchmark": torch.backends.cudnn.benchmark,
         },
         "dataset": str(Path(simu_path).resolve()), "seed": 0,
         "train_indices": list(train_ds.indices), "heldout_indices": list(val_ds.indices),

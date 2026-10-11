@@ -161,9 +161,17 @@ parser.add_argument(
     help="also retain and export the best checkpoint under the other loss criterion",
 )
 parser.add_argument("-require_cuda", action="store_true", help="hard stop instead of CPU fallback")
+parser.add_argument(
+    "-deterministic", action="store_true",
+    help="require deterministic operations for verification (not used by the full baseline protocol)",
+)
 args = parser.parse_args()
 if args.require_cuda and device.type != "cuda":
     raise SystemExit("HARD STOP: CUDA is required; no CPU fallback.")
+if args.deterministic:
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 # ------ where to save results -------- #
 results_path = f"{args.results_path}/{args.simu_name}{args.source_space}_/{args.sfolder}"
@@ -477,6 +485,7 @@ trainer = pl.Trainer(
     callbacks=cbs,
     log_every_n_steps=1, ## pas ce que je veux non?
     gradient_clip_val=gc_val,
+    deterministic=True if args.deterministic else None,
 )
 
 print(

@@ -43,11 +43,12 @@ Both commands may take time; logs are redirected to the run directory.
 The smoke uses existing SEREEGA `mes_debug_python` (100 genuine samples),
 75 train / 25 validation, two epochs, batch 8, CUDA. It compares legacy
 training-loss selection with dual selection: exact loss trajectories, split
-IDs must match exactly; training-selected weights must agree within absolute
-`1e-6` (relative tolerance zero). This is a cross-process verification tolerance,
-not a change to the scientific run: the unchanged legacy repeat showed a
-`4.285e-7` weight difference on CUDA while logged losses matched exactly.
-Each export must match its own saved checkpoint bit-for-bit. Each checkpoint must
+IDs, loss histories and training-selected weights must match exactly. Only the
+short verification runs use `-deterministic` and `CUBLAS_WORKSPACE_CONFIG=:4096:8`;
+the full scientific runs retain their original nondeterministic runtime settings.
+Initial smoke attempts demonstrated cross-process CUDA variation, including an
+unchanged legacy repeat; those failed verifications remain recorded. Each
+export must match its own saved checkpoint bit-for-bit. Each checkpoint must
 match its logged minimum and load successfully through the evaluation harness.
 
 Full runs use frozen `train8k_s0`: 8,000 loaded, 6,000 train / 2,000 held out,
