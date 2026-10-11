@@ -11,6 +11,7 @@ Team SynapseAI's fork of BrainForge's ViTESI: EEG source imaging that maps 75 sc
    - **Why not** the alternatives we considered.
    - **How** it's done (files, commands, key numbers).
 4. Push small commits as you go. When done: fill in the PR template's results, update the results table in #1, mark the PR ready, merge into `dev`.
+5. **Keep related work within its existing issue and PR.** Track small tasks with checklists; do not create child issues for each fix or run. The issue must give a new agent the current status, commands, evidence, blockers and exact next action.
 
 ## ⛔ Hard stop rule
 If any dependency or piece of infra is missing or not visible, **stop immediately** and report it. That means a package, CUDA/GPU, dataset, checkpoint, anatomy file, thesis setting, credential or permission. **Don't hack around it**: workarounds silently degrade results.
@@ -51,6 +52,8 @@ Exact versions are in `model_training/ablation/requirements-lock.txt`. Once per 
 - eval.py (multi-method, thesis script): pass `-root_simu <repo>/simulation/fsaverage`, the subject folder, not the repo root.
 - Params/FLOPs: `python count_flops.py --model VIT --input_shape 500 75`.
 - No test suite. "Testing" means a smoke run with small `-ne`, `-to_load` and `-n_epochs`, and it must pass before any full run.
+- Baseline reproduction #4: see `model_training/ablation/BASELINE_REPRODUCTION.md`. Use `-require_cuda -checkpoint_monitor validation_loss`; `-save_comparison_checkpoint` also saves the best training-loss checkpoint. The default remains `train_loss` for old commands. Runs write `run_manifest.json` with split indices and checkpoint provenance.
+- **Legacy early-stop flag is inverted:** omitting `-no_early_stop` disables early stopping; passing it enables early stopping. Do not pass it in the planned full 100-epoch baseline runs.
 
 ## Code facts that matter
 - `model_training/models/vit.py` `EEGViT`: each **timepoint is a token** (75 → 256 embed, depth 6, 8 heads), built on `nn.TransformerEncoderLayer`. In `eval()` it uses PyTorch's fused fast path, which skips Python hooks. Disable it (`torch.backends.mha.set_fastpath_enabled(False)`) before masking heads.
@@ -72,5 +75,6 @@ Exact versions are in `model_training/ablation/requirements-lock.txt`. Once per 
   - **held-out 2,000** (`evaluate.py train8k_s0 -to_load 8000 -heldout -per_valid 0.25`): comparable with the thesis's 5.07 mm;
   - **`test2k_s1`**: never seen, not even for early stopping.
 - Checkpoints go to the team Drive (`SynapseAI-FYP/checkpoints/`) with a README giving the exact command, seed and commit hash.
+- For #4 the user approved local checkpoint packaging followed by manual Drive upload. Training may proceed without Drive access; keep #4 open until its required runs and upload/link handoff are complete.
 - Every reported number must say which dataset, checkpoint and commit it came from.
 - Compare against the #4 baseline on the same frozen test set.
