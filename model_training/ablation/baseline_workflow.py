@@ -245,9 +245,20 @@ def verify_smoke(record):
         raise RuntimeError("Legacy/dual smoke training trajectories differ")
     left = torch.load(legacy["checkpoints"]["train_loss"]["weights"], weights_only=True)
     right = torch.load(dual["checkpoints"]["train_loss"]["weights"], weights_only=True)
-    if left.keys() != right.keys() or not all(torch.equal(left[k], right[k]) for k in left):
-        raise RuntimeError("Legacy/dual smoke training-selected weights differ")
+    if left.keys() != right.keys():
+        raise RuntimeError("Legacy/dual smoke weight keys differ")
+    # An unchanged legacy repeat differed by 4.285e-7 on this CUDA stack,
+    # with exactly identical logged losses. Do not change training kernels;
+    # use a recorded absolute tolerance only for this cross-process check.
+    maximum = max(float((left[k] - right[k]).abs().max()) for k in left)
+    record["smoke_weight_comparison"] = {"max_abs_difference": maximum, "atol": 1e-6, "rtol": 0}
+    if not all(torch.isfinite(right[k]).all() and torch.allclose(left[k], right[k], atol=1e-6, rtol=0) for k in left):
+        raise RuntimeError(f"Legacy/dual smoke weights differ beyond 1e-6: {maximum}")
     for monitor, item in dual["checkpoints"].items():
+        saved = torch.load(item["checkpoint"], map_location="cpu", weights_only=False)["state_dict"]
+        exported = torch.load(item["weights"], weights_only=True)
+        if saved.keys() != exported.keys() or not all(torch.equal(saved[k], exported[k]) for k in saved):
+            raise RuntimeError(f"Export does not exactly match its {monitor} checkpoint")
         events = scalars(dual)[monitor]
         best_step, best_loss = min(events, key=lambda v: v[1])
         if item["score"] != best_loss or item["epoch"] != (best_step + 1) // 10 - 1:
@@ -357,6 +368,7 @@ def main():
         publish(record, "**What:** start the approved checkpoint-selection experiment. **Why:** thesis validation selection differs from the inherited training-loss selection. **Why not:** no SNR/batch sweep or extra issues. **How:** frozen data, unchanged optimizer/model/noise, CUDA; exact commands are saved in workflow.json.")
         if args.stage == "smoke":
             verify_smoke(record)
+            gh("issue", "edit", "4", "--remove-label", "blocked")
         else:
             vit = train(record, "VIT")
             save_manifest(output / "workflow.json", record)
