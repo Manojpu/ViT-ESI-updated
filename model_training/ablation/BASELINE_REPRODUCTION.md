@@ -24,6 +24,35 @@ Batch 8 and SNR 5 are approved, explicitly unverified thesis defaults.
 No other settings are to be changed in this experiment. The loader supports
 random SNR but the CLI does not; random SNR is outside this experiment.
 
+## Current outcome: blocked after the controlled run (2026-10-13)
+
+The user-approved fresh restart `checkpoint-selection-20261013-restart`
+completed all 100 epochs on clean CUDA commit `84d435c`. Frozen datasets,
+batch 8, SNR 5, optimizer/loss/scaling and full-run runtime settings stayed fixed.
+Training plus validation took 15,471.377 seconds (4.30 hours); concurrent
+machine workloads were observed, so this is not isolated throughput.
+
+| Selection / weights | Epoch index | train8k_s0 held-out 2,000 LE mm | test2k_s1 2,000 LE mm |
+|---|---:|---:|---:|
+| validation_loss / VIT_model.pt | 93 | 7.147851 | 7.100556 |
+| train_loss / VIT_model_train_loss.pt | 99 | 7.189857 | 7.061963 |
+
+Validation selection improves held-out LE by only 0.042005 mm and fails the
+4.57–5.57 mm gate. **Do not start another training or ablation.** Obtain
+BrainForge's exact training/evaluation SNR, batch size and original notebook/
+configuration for Table 5.1; continue in existing #4 / draft PR #14.
+
+Full provenance, all five metrics and exact checkpoint paths/hashes are in
+`model_training/results/ablation/reproduction/checkpoint-selection-20261013-restart/full/workflow.json`
+and PR #14. Both checkpoint/weight hashes, all four 2,000-row CSVs, split
+exclusion, finite metrics/summary means and CUDA/commit provenance were
+independently checked. The local `baseline-handoff.zip` at that same location
+is 115,996,268 bytes; ZIP CRC, SHA-256 and 16 internal file hashes verified.
+ZIP SHA-256: `b17d62593c78a8146b72e544f2ccac0b77296c4d3c4285ea9dc493fec260a5e6`.
+Manual Drive upload is pending; upload alone does not close #4 while the gate
+and the remaining CNN/LSTM/DeepSIF baselines are unresolved. Interrupted v3
+and failed smoke attempts remain preserved and are not reported as baselines.
+
 ## Reproduction commands (PowerShell, repo root)
 
 Use the existing locked `venv`; do not reinstall or change dependencies.
