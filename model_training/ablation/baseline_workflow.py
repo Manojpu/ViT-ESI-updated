@@ -38,11 +38,15 @@ def gh(*args, body=None):
     command = ["gh", *args, "--repo", REPO]
     if body is not None:
         command += ["--body-file", "-"]
-    result = subprocess.run(command, input=body, text=True, encoding="utf-8", capture_output=True, check=True)
-    return result.stdout
+    # Windows text-mode stdin converts LF to CRLF. Re-sending a fetched JSON
+    # body containing CRLF otherwise adds another CR on every status update.
+    payload = re.sub(r"\r+\n", "\n", body).replace("\r", "\n").encode("utf-8") if body is not None else None
+    result = subprocess.run(command, input=payload, capture_output=True, check=True)
+    return result.stdout.decode("utf-8")
 
 
 def replace_status(body, block):
+    body = re.sub(r"\r+\n", "\n", body).replace("\r", "\n")
     if BEGIN in body:
         start = body.index(BEGIN)
         stop = body.index(END, start) + len(END)
