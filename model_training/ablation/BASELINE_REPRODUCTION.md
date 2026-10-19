@@ -5,6 +5,49 @@ and [draft PR #14](https://github.com/Project-Synapse-AI/ViT-ESI-updated/pull/14
 Use `ablation/baselines`; keep all related fixes, runs and handoff tasks there.
 Do not create small child issues or start an ablation before resolving this gate.
 
+## User-approved matched DeepSIF comparison (2026-10-19)
+
+The user explicitly authorized checking ViTESI versus DeepSIF while waiting for
+BrainForge's settings. This overrides the no-further-training stop **only for
+this matched DeepSIF comparison**. The thesis reproduction gate remains failed.
+Do not launch the old full workflow to perform this comparison: it retrains ViTESI.
+
+```powershell
+.\venv\Scripts\python.exe model_training/ablation/matched_deepsif.py --stage smoke --run-name matched-deepsif-20261019
+.\venv\Scripts\python.exe model_training/ablation/matched_deepsif.py --stage full --run-name matched-deepsif-20261019 --smoke-record model_training/results/ablation/matched_deepsif/matched-deepsif-20261019/smoke/workflow.json
+```
+
+Use a fresh output name; clean committed source and same-commit DeepSIF CUDA
+smoke are required. Preflight checks the locked environment, anatomy and all
+referenced dataset files, as well as unchanged scientific code and frozen
+config/index hashes against the prior ViTESI run. Smoke trains DeepSIF for two
+epochs on existing genuine mes_debug_python (75 train/25 held out), verifies
+checkpoint exports/loss minima and loads the primary weights through the harness.
+
+Full stage trains DeepSIF only, from scratch, for 100 epochs on the same
+6000/2000 split, batch 8, Adam 0.001, cosine loss, linear scaling, white noise
+5 dB, seed 0, 500 Hz / 1 second, CUDA, no early stopping. Both checkpoint
+criteria are retained, but only validation-selected weights enter the comparison.
+Reuse ViTESI validation-selected weights from clean experimental commit 84d435c,
+SHA-256 `0385eca30a2a423639cea9ca5bf53993cf9996ffb3a76235eccfdcd1da186a69`.
+Do not substitute the historical 7.04 mm train-selected model.
+
+The full runner evaluates DeepSIF on held-out train8k_s0 and independent test2k_s1,
+checks matching IDs/noise protocol, copies the existing ViTESI evaluation records,
+and reports all five metrics plus paired DeepSIF-minus-ViTESI differences.
+The primary endpoint is independent-test mean LE; checkpoints never depend on
+test LE. This is one training seed and the inherited DeepSIF implementation
+retrained on SEREEGA, not reproduction of its original NMM-trained paper.
+Unverified thesis settings remain unverified, including varying versus fixed
+SNR and thesis 500 ms/1 ms resolution versus frozen 1000 ms/500 Hz.
+
+Records: `model_training/results/ablation/matched_deepsif/<run-name>/<stage>/workflow.json`.
+Full completion updates #4, PR #14, roadmap #1 and the vault, and creates
+`matched-deepsif-handoff.zip` with both models, evaluations, paired CSVs,
+commands, provenance, README and checksums. Manual Drive upload remains pending.
+No automatic retry/resume, new seeds, tuning, CNN/LSTM/ablation runs or automatic
+merge/closure. The original failed-gate records and package stay preserved.
+
 ## Evidence and decision
 
 Historical commit `f7c8f13` trained ViTESI for 100 epochs at batch 8 / SNR 5.

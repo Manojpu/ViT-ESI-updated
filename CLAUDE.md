@@ -76,5 +76,6 @@ Exact versions are in `model_training/ablation/requirements-lock.txt`. Once per 
   - **`test2k_s1`**: never seen, not even for early stopping.
 - Checkpoints go to the team Drive (`SynapseAI-FYP/checkpoints/`) with a README giving the exact command, seed and commit hash.
 - For #4 the user approved local checkpoint packaging followed by manual Drive upload. Training may proceed without Drive access; keep #4 open until its required runs and upload/link handoff are complete.
+- **2026-10-19 user override:** a matched DeepSIF comparison may proceed while thesis reproduction is blocked. Use `model_training/ablation/matched_deepsif.py`: train only DeepSIF with the frozen ViTESI protocol and validation-loss selection, reuse the existing validation-selected ViTESI checkpoint, evaluate both frozen sets/all five metrics. This authorizes no tuning, extra baselines/ablations, merge or closure. Relative performance is usable under these settings; do not claim exact thesis replication. Keep all tracking in #4 / PR #14.
 - Every reported number must say which dataset, checkpoint and commit it came from.
 - Compare against the #4 baseline on the same frozen test set.
