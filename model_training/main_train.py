@@ -21,6 +21,7 @@ from load_data.FolderStructure import FolderStructure
 from load_data import HeadModel
 import json
 from pathlib import Path
+from ablation.training_record import make_manifest, save_manifest, export_checkpoint
 
 # Training on GPU if available
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -151,7 +152,26 @@ parser.add_argument(
     help="Path to a saved checkpoint (.ckpt) to resume training from (optimizer, epoch, and model state are restored).",
 )
 
+parser.add_argument(
+    "-checkpoint_monitor", choices=["train_loss", "validation_loss"], default="train_loss",
+    help="loss minimized when selecting the primary exported model (legacy default: train_loss)",
+)
+parser.add_argument(
+    "-save_comparison_checkpoint", action="store_true",
+    help="also retain and export the best checkpoint under the other loss criterion",
+)
+parser.add_argument("-require_cuda", action="store_true", help="hard stop instead of CPU fallback")
+parser.add_argument(
+    "-deterministic", action="store_true",
+    help="require deterministic operations for verification (not used by the full baseline protocol)",
+)
 args = parser.parse_args()
+if args.require_cuda and device.type != "cuda":
+    raise SystemExit("HARD STOP: CUDA is required; no CPU fallback.")
+if args.deterministic:
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 # ------ where to save results -------- #
 results_path = f"{args.results_path}/{args.simu_name}{args.source_space}_/{args.sfolder}"
@@ -419,10 +439,22 @@ print(f"### best model path: {best_model_path} ###")
 
 # --------------------- TRAINING ------------------------#
 checkpoint_callback = ModelCheckpoint(
-    dirpath=f"{results_path}/pl_checkpoints",
-    filename="{epoch}-{train_loss:.2f}",
-    monitor="train_loss",
+    dirpath=f"{results_path}/pl_checkpoints/{args.checkpoint_monitor}",
+    filename="{epoch}-{" + args.checkpoint_monitor + ":.6f}",
+    monitor=args.checkpoint_monitor,
+    mode="min",
+    save_top_k=1,
 )
+checkpoint_callbacks = [checkpoint_callback]
+if args.save_comparison_checkpoint:
+    comparison_monitor = "train_loss" if args.checkpoint_monitor == "validation_loss" else "validation_loss"
+    checkpoint_callbacks.append(ModelCheckpoint(
+        dirpath=f"{results_path}/pl_checkpoints/{comparison_monitor}",
+        filename="{epoch}-{" + comparison_monitor + ":.6f}",
+        monitor=comparison_monitor,
+        mode="min",
+        save_top_k=1,
+    ))
 
 try:
     logger = TensorBoardLogger(save_dir=f"{results_path}/logs/")
@@ -440,10 +472,10 @@ else:
 
 # early stopping strategy
 if args.no_early_stop:
-    cbs = [checkpoint_callback]
+    cbs = list(checkpoint_callbacks)
 else:
     early_stop_cb = EarlyStopping(monitor="validation_loss", min_delta=0.0, patience=20)
-    cbs = [checkpoint_callback, early_stop_cb]
+    cbs = [*checkpoint_callbacks, early_stop_cb]
 
 # trainer
 trainer = pl.Trainer(
@@ -453,6 +485,7 @@ trainer = pl.Trainer(
     callbacks=cbs,
     log_every_n_steps=1, ## pas ce que je veux non?
     gradient_clip_val=gc_val,
+    deterministic=True if args.deterministic else None,
 )
 
 print(
@@ -460,24 +493,34 @@ print(
 )
 if args.resume:
     print(f"Resuming from checkpoint: {args.resume}")
+manifest = make_manifest(args, repo_root, simu_path, train_ds, val_ds, model, lr, device, gc_val)
+manifest_path = Path(results_path) / "run_manifest.json"
+save_manifest(manifest_path, manifest)
 start_t = time.time()
-trainer.fit(
-    model,
-    train_dataloaders=train_dataloader,
-    val_dataloaders=val_dataloader,
-    ckpt_path=args.resume,
-)
-end_t = time.time()
-#trainer.save_checkpoint(f"{results_path}/pl_checkpoints/{args.sfolder}.ckpt")
-
-
-### save best model.
-best_model = net.load_from_checkpoint(
-    checkpoint_path=trainer.checkpoint_callback.best_model_path,
-    map_location=torch.device("cpu"),
-    **net_parameters,
-)
-torch.save(best_model.state_dict(), best_model_path)
+try:
+    trainer.fit(
+        model,
+        train_dataloaders=train_dataloader,
+        val_dataloaders=val_dataloader,
+        ckpt_path=args.resume,
+    )
+    end_t = time.time()
+    manifest["duration_seconds"] = end_t - start_t
+    manifest["completed_epochs"] = int(trainer.current_epoch)
+    for callback in checkpoint_callbacks:
+        export_path = (best_model_path if callback is checkpoint_callback else
+                       f"{results_path}/trained_models/{args.model}_model_{callback.monitor}.pt")
+        manifest["checkpoints"][callback.monitor] = export_checkpoint(
+            callback, net, net_parameters, export_path,
+        )
+    manifest["status"] = "completed"
+    save_manifest(manifest_path, manifest)
+except BaseException as error:
+    manifest["status"] = "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
+    manifest["duration_seconds"] = time.time() - start_t
+    manifest["error"] = f"{type(error).__name__}: {error}"
+    save_manifest(manifest_path, manifest)
+    raise
 print(f"Training time : {(end_t-start_t)}")
 
 with open(f'{results_path}/training_times.txt','a') as f :

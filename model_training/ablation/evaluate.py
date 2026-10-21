@@ -200,8 +200,43 @@ def build_model(name, args, n_sensors, n_sources, n_times):
             lr=1e-3,
             criterion=None,
         )
-    # 1DCNN / LSTM / DEEPSIF are added in #4
-    raise SystemExit(f"model '{name}' not supported by the harness yet (VIT only; others come in #4)")
+    # The three baselines are built exactly like main_train.py builds them (same constructor args).
+    if name == "1DCNN":
+        from models.cnn_1d import CNN1Dpl
+
+        return CNN1Dpl(
+            channels=[n_sensors, args.inter_layer, n_sources],
+            kernel_size=args.kernel_size,
+            bias=False,
+            optimizer=None,
+            lr=1e-3,
+            criterion=None,
+        )
+    if name == "LSTM":
+        from models.lstm import HeckerLSTMpl
+
+        return HeckerLSTMpl(
+            n_electrodes=n_sensors,
+            hidden_size=85,
+            n_sources=n_sources,
+            bias=False,
+            optimizer=None,
+            lr=1e-3,
+            criterion=None,
+            mc_dropout_rate=0,
+        )
+    if name == "DEEPSIF":
+        from models.deepsif import DeepSIFpl
+
+        return DeepSIFpl(
+            num_sensor=n_sensors,
+            num_source=n_sources,
+            temporal_input_size=args.deepsif_temporal_input_size,
+            optimizer=None,
+            lr=1e-3,
+            criterion=None,
+        )
+    raise SystemExit(f"unknown model '{name}' (VIT, 1DCNN, LSTM, DEEPSIF)")
 
 
 def _git_info():
@@ -245,6 +280,9 @@ def main():
     p.add_argument("-loss", default="cosine", help="training loss of the model (selects the rescaling)")
     p.add_argument("-seed", type=int, default=0)
     p.add_argument("-device", default="cuda", choices=["cuda", "cpu"])
+    p.add_argument("-inter_layer", type=int, default=4096, help="1DCNN hidden channels (main_train.py default)")
+    p.add_argument("-kernel_size", type=int, default=5, help="1DCNN kernel size (main_train.py default)")
+    p.add_argument("-deepsif_temporal_input_size", type=int, default=500, help="DeepSIF hidden size (main_train.py default)")
     p.add_argument("-vit_embed_dim", type=int, default=256)
     p.add_argument("-vit_depth", type=int, default=6)
     p.add_argument("-vit_heads", type=int, default=8)
