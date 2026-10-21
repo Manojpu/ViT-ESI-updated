@@ -55,7 +55,7 @@ def main():
     commit = args.commit or _git("rev-parse", "HEAD")
     if args.commit is None and _git("status", "--porcelain", "--untracked-files=no"):
         raise SystemExit("commit or discard tracked changes first: the notebook runs the pushed commit, not this working tree")
-    if commit not in _git("branch", "-r", "--contains", commit):
+    if not _git("branch", "-r", "--contains", commit):
         raise SystemExit(f"commit {commit[:7]} is not on origin yet; push it first")
 
     title = args.title or f"vitesi {args.job} {args.model.lower()}"
