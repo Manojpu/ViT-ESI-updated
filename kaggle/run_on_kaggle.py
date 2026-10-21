@@ -27,6 +27,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Kaggle's "T4 x2" has two GPUs and Lightning's devices="auto" would train with DDP on both,
+# doubling the effective batch (2 x 8). Pin every stage to one GPU, as in the local #4 runs.
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 ROOT = Path(__file__).resolve().parents[1]
 SIMU = ROOT / "simulation/fsaverage/constrained/standard_1020/fsav_994/simu"
 FINGERPRINTS = ROOT / "data_generation/fingerprints"
@@ -87,7 +91,8 @@ def environment(job):
         "platform": platform.platform(),
         "torch": torch.__version__,
         "cuda": torch.version.cuda,
-        "gpu": [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())],
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "gpu_used": [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())],
         "nvidia_smi": subprocess.run(["nvidia-smi"], capture_output=True, text=True).stdout,
     }
     job.save()
@@ -149,7 +154,9 @@ def train(job, model, n_load, epochs, extra):
         "-leadfield_mat", str(ROOT / "anatomy/leadfield_75_20k.mat"), "-simu_folder", str(SIMU / "train8k_s0"),
         *extra,
     ], cwd=ROOT / "model_training")
-    found = glob.glob(str(results / "**" / "trained_models" / f"{model}_model.pt"), recursive=True)
+    if "Initializing distributed" in (job.out / "logs" / f"train_{model}.log").read_text():
+        raise SystemExit("HARD STOP: training ran distributed (more than one GPU); the protocol is single-GPU batch 8.")
+    found =glob.glob(str(results / "**" / "trained_models" / f"{model}_model.pt"), recursive=True)
     if len(found) != 1:
         raise SystemExit(f"HARD STOP: expected one exported {model}_model.pt, found {found}")
     return Path(found[0])
