@@ -45,6 +45,7 @@ from ablation.evaluate import (  # noqa: E402
     load_module_weights,
     summarize,
 )
+from ablation.seed import set_seed  # noqa: E402
 
 METRICS = ["LE_mm", "AUC", "nMSE", "PSNR", "time_err_ms"]
 
@@ -107,6 +108,55 @@ def verify_head_mask(model, x, device):
     return {"max_rel_diff_vs_manual": worst, "full_layer0_output_change": changed, "restore_diff": restored}
 
 
+class MeanHeads:
+    """
+    Mean-ablation: every attention layer runs through a hand-written forward (fast path off)
+    that can record each head's output, or swap chosen heads for their per-position mean
+    (shape heads x T x d per layer) recorded on training samples.
+    """
+
+    def __init__(self, model):
+        torch.backends.mha.set_fastpath_enabled(False)  # so the layers call our forward
+        self.attns = attn_layers(model)
+        self.recording = False
+        self.sums = None
+        self.n = 0
+        self.means = None
+        self.swap = {}  # layer -> list of heads to replace by their mean
+        for li, attn in enumerate(self.attns):
+            attn.forward = self._forward(li, attn)
+
+    def _forward(self, li, attn):
+        def forward(query, key, value, *args, **kwargs):
+            if not (query is key and key is value):
+                raise RuntimeError("MeanHeads only supports self-attention")
+            B, T, D = query.shape
+            H, d = attn.num_heads, D // attn.num_heads
+            qkv = torch.nn.functional.linear(query, attn.in_proj_weight, attn.in_proj_bias)
+            q, k, v = (t.reshape(B, T, H, d).transpose(1, 2) for t in qkv.chunk(3, dim=-1))
+            heads = torch.softmax(q @ k.transpose(-2, -1) / d**0.5, dim=-1) @ v  # (B, H, T, d)
+            if self.recording:
+                self.sums[li] += heads.sum(0)
+            for h in self.swap.get(li, ()):
+                heads[:, h] = self.means[li, h]
+            return attn.out_proj(heads.transpose(1, 2).reshape(B, T, D)), None
+
+        return forward
+
+    @torch.no_grad()
+    def record(self, model, ds, indices, seed, device):
+        a = self.attns[0]
+        self.sums = torch.zeros(len(self.attns), a.num_heads, model.model.n_times, a.embed_dim // a.num_heads, device=device)
+        self.recording, self.n = True, 0
+        for k in indices:
+            set_seed(seed + int(k))  # same noise convention as the harness
+            M, _ = ds[k]
+            model(M.float().unsqueeze(0).to(device))
+            self.n += 1
+        self.recording = False
+        self.means = self.sums / self.n
+
+
 def paired_delta(base, run, metric, n_boot, rng):
     d = run[metric].to_numpy() - base[metric].to_numpy()
     idx = rng.integers(0, len(d), size=(n_boot, len(d)))
@@ -127,6 +177,9 @@ def main():
     p.add_argument("-device", default="cuda", choices=["cuda", "cpu"])
     p.add_argument("-n_boot", type=int, default=2000)
     p.add_argument("-only", default=None, help="comma list of run names to do, e.g. intact,L0_all,L0_H3 (smoke)")
+    p.add_argument("-mode", default="zero", choices=["zero", "mean"])
+    p.add_argument("-mean_simu", default="train8k_s0", help="mean mode: set whose training split gives the head means")
+    p.add_argument("-n_mean", type=int, default=2000, help="mean mode: training samples used for the means")
     p.add_argument("-leadfield_mat", default=str(MT_DIR.parent / "anatomy" / "leadfield_75_20k.mat"))
     p.add_argument("-vit_embed_dim", type=int, default=256)
     p.add_argument("-vit_depth", type=int, default=6)
@@ -152,9 +205,40 @@ def main():
         raise SystemExit(f"head mask failed its sanity check: {check}")
 
     n_layers, n_heads = args.vit_depth, args.vit_heads
+    mean_heads = None
+    if args.mode == "mean":
+        from ablation.evaluate import heldout_indices
+
+        with torch.no_grad():
+            fast = model(x0)
+        mean_heads = MeanHeads(model)
+        mctx = load_context(args.root_simu, args.mean_simu, 8000, args.eeg_snr, args.leadfield_mat)
+        held = set(heldout_indices(len(mctx.dataset), 0.25))
+        train_idx = [k for k in range(len(mctx.dataset)) if k not in held][: args.n_mean]
+        print(f"recording head means on {len(train_idx)} training samples of {args.mean_simu}")
+        mean_heads.record(model, mctx.dataset, train_idx, args.seed, args.device)
+        torch.save({"means": mean_heads.means.cpu(), "indices": train_idx}, out / "head_means.pt")
+        with torch.no_grad():
+            manual = model(x0)
+            mean_heads.swap = {0: list(range(n_heads))}
+            swapped = model(x0)
+            mean_heads.swap = {}
+        check.update(
+            {
+                "manual_vs_fastpath_rel_diff": float((manual - fast).abs().max() / fast.abs().max()),
+                "mean_layer0_output_change": float((swapped - manual).abs().max()),
+                "mean_simu": args.mean_simu,
+                "n_mean": len(train_idx),
+            }
+        )
+        print(f"mean-mode check: {check}")
+        if check["manual_vs_fastpath_rel_diff"] > 1e-3 or check["mean_layer0_output_change"] < 1e-3:
+            raise SystemExit(f"mean ablation failed its sanity check: {check}")
+
     runs = [("intact", None, [])]
     runs += [(f"L{l}_all", l, list(range(n_heads))) for l in range(n_layers)]
-    runs += [(f"L{l}_H{h}", l, [h]) for l in range(n_layers) for h in range(n_heads)]
+    heads_layers = range(n_layers) if args.mode == "zero" else [0]  # mean mode: only layer 0 needed per head
+    runs += [(f"L{l}_H{h}", l, [h]) for l in heads_layers for h in range(n_heads)]
     if args.only:
         keep = set(args.only.split(","))
         runs = [r for r in runs if r[0] in keep]
@@ -164,9 +248,14 @@ def main():
         if (rdir / "summary.json").exists():
             continue
         print(f"A1 {name}: layer {layer} heads {heads}")
-        ctxm = head_mask(model, layer, heads) if heads else contextlib.nullcontext()
-        with ctxm:
+        if mean_heads is not None:
+            mean_heads.swap = {layer: heads} if heads else {}
             df = evaluate(model, ctx, loss=args.loss, seed=args.seed, device=args.device)
+            mean_heads.swap = {}
+        else:
+            ctxm = head_mask(model, layer, heads) if heads else contextlib.nullcontext()
+            with ctxm:
+                df = evaluate(model, ctx, loss=args.loss, seed=args.seed, device=args.device)
         rdir.mkdir(exist_ok=True)
         df.to_csv(rdir / "per_sample.csv", index=False)
         with open(rdir / "summary.json", "w") as f:
@@ -194,7 +283,12 @@ def main():
         "n_samples": int(len(base)),
         "intact": {m: float(base[m].mean()) for m in METRICS},
         "mask_check": check,
-        "ablation": "zero (out_proj columns of the head set to 0)",
+        "ablation": (
+            "zero (out_proj columns of the head set to 0)"
+            if args.mode == "zero"
+            else "mean (head output replaced by its per-position mean over training samples; "
+            "intact = same hand-written attention path with nothing replaced)"
+        ),
         "deltas": table,
         "eeg_snr": args.eeg_snr,
         "seed": args.seed,
