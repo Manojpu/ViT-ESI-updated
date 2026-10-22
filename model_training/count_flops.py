@@ -134,13 +134,14 @@ class _DeepSIFWrapper(nn.Module):
 # Model registry
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_model_configs(n_electrodes: int, n_sources: int, n_times: int) -> dict:
+def build_model_configs(n_electrodes: int, n_sources: int, n_times: int,
+                        inter_layer: int = 4096, lstm_hidden: int = 85) -> dict:
     return {
         "1D CNN": {
             "module": "models.cnn_1d",
             "class":  "CNN1Dpl",
             "kwargs": dict(
-                channels=[n_electrodes, 4096, n_sources],
+                channels=[n_electrodes, inter_layer, n_sources],
                 kernel_size=5,
                 bias=False,
             ),
@@ -151,7 +152,7 @@ def build_model_configs(n_electrodes: int, n_sources: int, n_times: int) -> dict
             "class":  "HeckerLSTMpl",
             "kwargs": dict(
                 n_electrodes=n_electrodes,
-                hidden_size=85,
+                hidden_size=lstm_hidden,
                 n_sources=n_sources,
                 bias=False,
                 mc_dropout_rate=0,
@@ -199,6 +200,10 @@ def parse_args() -> argparse.Namespace:
                    help="Number of source dipoles (default: 994)")
     p.add_argument("--n_times",      type=int, default=500,
                    help="Time-series length in samples (default: 500)")
+    p.add_argument("--inter_layer",  type=int, default=4096,
+                   help="1D CNN hidden channels (default: 4096)")
+    p.add_argument("--lstm_hidden",  type=int, default=85,
+                   help="LSTM hidden size per direction (default: 85)")
     p.add_argument("--backend", type=str, default=None,
                    choices=["thop", "torchinfo", "fvcore"],
                    help="Force a specific FLOPs backend (auto-detected if omitted)")
@@ -235,7 +240,8 @@ def main() -> None:
     print(header)
     print("-" * 72)
 
-    configs = build_model_configs(n_electrodes, n_sources, n_times)
+    configs = build_model_configs(n_electrodes, n_sources, n_times,
+                                  args.inter_layer, args.lstm_hidden)
 
     rows: list[dict] = []
 

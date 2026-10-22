@@ -105,6 +105,12 @@ parser.add_argument(
     "-kernel_size", type=int, default=5, help="kernel size of the 1D CNN"
 )
 parser.add_argument(
+    "-lstm_hidden",
+    type=int,
+    default=85,
+    help="hidden size of each LSTM direction (85 = thesis baseline)",
+)
+parser.add_argument(
     "-deepsif_temporal_input_size",
     type=int,
     default=500,
@@ -358,7 +364,7 @@ elif args.model.upper() == "LSTM":
     lr = 1e-3
     net_parameters = {
         "n_electrodes": n_electrodes,
-        "hidden_size": 85,
+        "hidden_size": args.lstm_hidden,
         "n_sources": n_sources,
         "bias": False,
         "optimizer": torch.optim.Adam,
