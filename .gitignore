@@ -17,3 +17,5 @@ model_training/trained_models/
 
 
 model_training/training_times.txt   
+# Kaggle notebook folders built by kaggle/push_job.py
+kaggle/build/
