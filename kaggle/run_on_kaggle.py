@@ -30,6 +30,9 @@ from pathlib import Path
 # Kaggle's "T4 x2" has two GPUs and Lightning's devices="auto" would train with DDP on both,
 # doubling the effective batch (2 x 8). Pin every stage to one GPU, as in the local #4 runs.
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# Child Python processes write into a pipe; stream progress immediately instead of
+# waiting for Python's block buffer to fill.
+os.environ["PYTHONUNBUFFERED"] = "1"
 
 ROOT = Path(__file__).resolve().parents[1]
 SIMU = ROOT / "simulation/fsaverage/constrained/standard_1020/fsav_994/simu"
@@ -65,7 +68,9 @@ class Job:
             proc = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in proc.stdout:
                 sys.stdout.write(line)
+                sys.stdout.flush()
                 log.write(line)
+                log.flush()
             proc.wait()
         record.update(finished_utc=_now(), returncode=proc.returncode)
         self.save()
