@@ -30,7 +30,9 @@ def main():
     n_layers = 1 + max(r["layer"] for r in rows)
     n_heads = 1 + max(max(r["heads"]) for r in rows)
 
-    fig, axes = plt.subplots(1, len(PANELS), figsize=(4.2 * len(PANELS), 4.6))
+    fig, axes = plt.subplots(2, 3, figsize=(19, 9.5))
+    axes = axes.flat
+    axes[len(PANELS)].axis("off")
     for ax, (m, name) in zip(axes, PANELS):
         grid = np.full((n_layers, n_heads + 2), np.nan)  # 8 heads, a gap, whole layer
         sig = np.zeros_like(grid, dtype=bool)
@@ -45,14 +47,15 @@ def main():
         for (i, j), v in np.ndenumerate(grid):
             if np.isnan(v):
                 continue
-            txt = f"{v:.2g}" + ("*" if sig[i, j] else "")
-            ax.text(j, i, txt, ha="center", va="center", fontsize=6.5)
+            txt = f"{v:.2f}" if abs(v) >= 0.01 else f"{v:.0e}"
+            txt = txt + ("*" if sig[i, j] else "")
+            ax.text(j, i, txt, ha="center", va="center", fontsize=7.5)
         ax.set_xticks(list(range(n_heads)) + [n_heads + 1])
         ax.set_xticklabels([f"H{h}" for h in range(n_heads)] + ["all"], fontsize=7)
         ax.set_yticks(range(n_layers))
         ax.set_yticklabels([f"L{l}" for l in range(n_layers)], fontsize=7)
         ax.set_title(name, fontsize=10)
-        fig.colorbar(im, ax=ax, fraction=0.035)
+        fig.colorbar(im, ax=ax, fraction=0.03)
     intact = s["intact"]
     fig.suptitle(
         f"A1: zero-ablate one head (or a whole layer) vs intact ViTESI on {s['n_samples']} samples "
